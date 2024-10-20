@@ -195,13 +195,13 @@ int clgetDevCapability(cl_device_id deviceIdx) {
 	size_t size;
 	cl_int status;
 
-	if (deviceIdx != 0)
-	 {
+	// if (deviceIdx != 0)
+	//  {
 		status = clGetDeviceInfo(deviceIdx,CL_DRIVER_VERSION, sizeof(saida),saida,&size);
 		major = saida[0] - '0';
 	   minor = saida[2] - '0';
 	   return (major*100+minor*10);
-	  }
+	//   }
 
 }
 
@@ -234,20 +234,31 @@ void clprintGPUDevices(FILE * file) {
     char saida[30];
 
 
-	clutilSafeCall(clGetPlatformIDs(0, NULL, &numPlatforms));
-	platform = (cl_platform_id *)alloca(sizeof(cl_platform_id) * numPlatforms);
+    // Get the number of platforms
+    clutilSafeCall(clGetPlatformIDs(0, NULL, &numPlatforms));  // Get platform count
 
+    // Allocate memory for platform IDs
+    platform = (cl_platform_id *)malloc(sizeof(cl_platform_id) * numPlatforms);
+
+    // Get platform IDs
+    clutilSafeCall(clGetPlatformIDs(numPlatforms, platform, NULL));  // Retrieve platforms
+
+    // Loop over all platforms and query GPU devices
     for (cl_uint i = 0; i < numPlatforms; i++)
-		 {  errnum = clGetDeviceIDs(platform[i], PLAT,	0,	NULL,	&numDevices);
-		    if (errnum == CL_DEVICE_NOT_FOUND  || errnum CL_DEVICE_NOT_AVAILABLE || numDevices < 1)
-                fprintf (file,"No available GPU device found \n");
+    {
+        errnum = clGetDeviceIDs(platform[i], PLAT, 0, NULL, &numDevices);  // Get number of GPU devices
+		if (errnum == CL_DEVICE_NOT_FOUND  || errnum == CL_DEVICE_NOT_AVAILABLE || numDevices < 1)
+        {
+            printf("No available GPU device found on platform %u\n", i);
+        }
             else
             	{ fprintf (file,"Detected GPUs: %u", numDevices);
-            	  errnum = clGetDeviceIDs(platform[i], PLAT,	0,	deviceIds,	&numDevices);
+            	  errnum = clGetDeviceIDs(platform[i], PLAT,	numDevices, deviceIds, NULL);
             	  fprintf (file,"ID: NAME (RAM)\n");
             	  fprintf (file,"---------------------------\n");
-		          for (int j=1; j<numDevices; j++)
-		            { bool compatible = (clgetCompiledCapability() <= clgetDevCapability(deviceIds[j]));
+		          for (int j=0; j<numDevices; j++)
+		            { 
+					bool compatible = (clgetCompiledCapability() <= clgetDevCapability(deviceIds[j]));
 			          if (compatible)
 			        	  fprintf (file,"%n",(&j+1));
 			          else

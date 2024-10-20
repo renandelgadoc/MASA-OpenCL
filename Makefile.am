@@ -4,20 +4,17 @@ ACLOCAL_AMFLAGS = ${ACLOCAL_FLAGS}
 
 bin_PROGRAMS = masa-opencl
 masa_opencl_CXXFLAGS = $(CUDA_CFLAGS) $(COMMONFLAGS) -malign-double -fno-strict-aliasing  
-masa_opencl_LDADD = $(CUDA_LIBS) $(COMMONFLAGS) ./src/OpenCLAligner.cu_o $(LIBMASA_PATH)/libmasa.a -lcuda -lcudart -lpthread -lOpenCL
+masa_opencl_LDADD = $(CUDA_LIBS) $(COMMONFLAGS)  $(LIBMASA_PATH)/libmasa.a -lpthread -lOpenCL
 
 masa_opencl_SOURCES = \
 ./src/main.cpp \
-./src/cuda_util.cpp \
 ./src/cl_util.cpp \
 ./src/OpenCLAligner.cpp \
-./src/OpenCLAligner.cu \
 ./src/OpenCLAlignerCL.cpp \
 ./src/OpenCLAlignerCL.cl \
 ./src/OpenCLAlignerParameters.cpp 
 
 noinst_HEADERS = \
-./src/cuda_util.h \
 ./src/cl_util.h \
 ./src/OpenCLAligner.hpp \
 ./src/OpenCLAlignerCL.hpp \

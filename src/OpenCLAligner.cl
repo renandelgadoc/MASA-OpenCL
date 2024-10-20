@@ -23,55 +23,6 @@
 #define INF (999999999)
 
 
-
-// ******************************************************************************* //
-
-int cl_findMax(int idx, int val) {
-    local int s_max[THREADS_COUNT];
-    local int s_idx;
-    int count = THREADS_COUNT>>1;
-    s_max[idx] = val;
-    //barrier(CLK_GLOBAL_MEM_FENCE);
-    barrier(CLK_LOCAL_MEM_FENCE);
-
-    while (count > 0) {
-        if (idx < count) {
-            if (s_max[idx] < s_max[idx+count]) {
-                s_max[idx] = s_max[idx+count];
-            }
-        }
-        count = count >> 1;
-        //barrier(CLK_GLOBAL_MEM_FENCE);
-		barrier(CLK_LOCAL_MEM_FENCE);
-    }
-    if (s_max[0] == val) {
-        s_idx = idx;
-    }
-    //barrier(CLK_GLOBAL_MEM_FENCE);
-    barrier(CLK_LOCAL_MEM_FENCE);
-    return (s_idx == idx);
-}
-
-// ******************************************************************************* //
-
-int cl_findMaxSmall(int idx, int val) {
-	local int s_max;
-	local int s_idx;
-	local int response;
-
-	s_max = -INF;
-	//barrier(CLK_GLOBAL_MEM_FENCE);
-	barrier(CLK_LOCAL_MEM_FENCE);
-
-   	response = atomic_max(&s_max, val);
-	if (s_max == val) {
-		s_idx = idx;
-	}
-    //barrier(CLK_GLOBAL_MEM_FENCE);
-    barrier(CLK_LOCAL_MEM_FENCE);
-    return (s_idx == idx);
-}
-
 // ******************************************************************************* //
 
 static int cl_get_flush_id(const int i, const int i0, const int i1) {
@@ -293,14 +244,14 @@ void cl_process_internal_diagonals_short_phase(
 	__global int4* flushColumn_e,
 	__global int* d_split,
 	__global char* t_seq0,
-	__global char* t_seq1)
+	__global char* t_seq1,
+    __local int s_colx[2][THREADS_COUNT],
+    __local int s_coly[2][THREADS_COUNT])
 	
 {
     size_t nugr = get_num_groups(0);
     size_t glsize = get_global_size(0);
     
-    __local int s_colx[2][THREADS_COUNT];
-    __local int s_coly[2][THREADS_COUNT];
 
     s_colx[0][idx] = s_colx[1][idx] = busV_o[tidx].x; // TODO poderia ser pego de busV_h[tidx].w. Certo?
     s_coly[0][idx] = s_coly[1][idx] = busV_o[tidx].y;
@@ -409,6 +360,9 @@ __kernel void cl_kernel_short_phase(
     size_t glsize = get_global_size(0);
     size_t nugr = get_num_groups(0);
     
+    __local int s_colx[2][THREADS_COUNT];
+    __local int s_coly[2][THREADS_COUNT];
+
     int by = step-bx;
 
     if (by < 0) return;
@@ -452,13 +406,36 @@ __kernel void cl_kernel_short_phase(
     int flush_id = cl_get_flush_id(i, i0, i1);
     
 	//if (i < i1) {
-		cl_process_internal_diagonals_short_phase(idx, tidx, i, j, i0, j0, i1, j1, busH, extraH, busV_h, busV_e, busV_o, &max, &max_pos, flush_id, loadColumn_h, loadColumn_e, flushColumn_h, flushColumn_e, d_split, t_seq0, t_seq1);
+		cl_process_internal_diagonals_short_phase(idx, tidx, i, j, i0, j0, i1, j1, busH, extraH, busV_h, busV_e, busV_o, &max, &max_pos, flush_id, loadColumn_h, loadColumn_e, flushColumn_h, flushColumn_e, d_split, t_seq0, t_seq1, s_colx, s_coly);
     //}
 
   
 	/* Updates the block result with the block best score */
 
-	if (cl_findMax(loid, max)) {
+	local int s_max[THREADS_COUNT];
+    local int s_idx;
+    int count = THREADS_COUNT>>1;
+    s_max[idx] = max;
+    //barrier(CLK_GLOBAL_MEM_FENCE);
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    while (count > 0) {
+        if (idx < count) {
+            if (s_max[idx] < s_max[idx+count]) {
+                s_max[idx] = s_max[idx+count];
+            }
+        }
+        count = count >> 1;
+        //barrier(CLK_GLOBAL_MEM_FENCE);
+		barrier(CLK_LOCAL_MEM_FENCE);
+    }
+    if (s_max[0] == max) {
+        s_idx = idx;
+    }
+    //barrier(CLK_GLOBAL_MEM_FENCE);
+    barrier(CLK_LOCAL_MEM_FENCE);
+    
+	if (s_idx == idx) {
 	    	    
         blockResult[grid].w = max;
 		blockResult[grid].x = max_pos.x;
@@ -488,11 +465,12 @@ void cl_process_internal_diagonals_long_phase(
 	int2* max_pos,
 	const int flush_id, 
 	__global char* t_seq0, 
-	__global char* t_seq1) 
+	__global char* t_seq1,
+	__local int s_colx[2][THREADS_COUNT], 
+    __local int s_coly[2][THREADS_COUNT]
+) 
 	
 {
-    __local int s_colx[2][THREADS_COUNT]; 
-    __local int s_coly[2][THREADS_COUNT]; 
 
 
     s_colx[0][idx] = s_colx[1][idx] = busV_o[tidx].x;
@@ -591,7 +569,8 @@ __kernel void cl_kernel_long_phase(
 	size_t loid = get_local_id(0);
 	size_t glid = get_global_id(0);
 	size_t losize = get_local_size(0);
-	
+	__local int s_colx[2][THREADS_COUNT]; 
+    __local int s_coly[2][THREADS_COUNT]; 
     const int bx = grid; 
 
 	if (bx < cutBlock.x || bx > cutBlock.y) {
@@ -628,14 +607,37 @@ __kernel void cl_kernel_long_phase(
 
     //if (i < i1) {
         int flush_id = cl_get_flush_id(i, i0, i1);
-        cl_process_internal_diagonals_long_phase(xLen, idx, tidx, i, j, busH, extraH, busV_h, busV_e, busV_o, &max, &max_pos, flush_id, t_seq0, t_seq1);
+        cl_process_internal_diagonals_long_phase(xLen, idx, tidx, i, j, busH, extraH, busV_h, busV_e, busV_o, &max, &max_pos, flush_id, t_seq0, t_seq1, s_colx, s_coly);
     //}
 	
 	if (!flush_id) {
         max = -INF; 
     }
+
+	local int s_max[THREADS_COUNT];
+    local int s_idx;
+    int count = THREADS_COUNT>>1;
+    s_max[idx] = max;
+    //barrier(CLK_GLOBAL_MEM_FENCE);
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    while (count > 0) {
+        if (idx < count) {
+            if (s_max[idx] < s_max[idx+count]) {
+                s_max[idx] = s_max[idx+count];
+            }
+        }
+        count = count >> 1;
+        //barrier(CLK_GLOBAL_MEM_FENCE);
+		barrier(CLK_LOCAL_MEM_FENCE);
+    }
+    if (s_max[0] == max) {
+        s_idx = idx;
+    }
+    //barrier(CLK_GLOBAL_MEM_FENCE);
+    barrier(CLK_LOCAL_MEM_FENCE);
     
-	if (cl_findMax(loid, max)) {
+	if (s_idx == idx) {
 		blockResult[grid].w = max;
 		blockResult[grid].x = max_pos.x;
 		blockResult[grid].y = max_pos.y+i;
@@ -671,13 +673,15 @@ void cl_process_internal_diagonals_single_phase(
 	__global int4* flushColumn_e,  
 	__global int* d_split,  
 	__global char* t_seq0,  
-	__global char* t_seq1)  
+	__global char* t_seq1,
+	__local int s_colx[2][THREADS_COUNT],
+    __local int s_coly[2][THREADS_COUNT]
+	)  
 	
 {
     size_t losize = get_local_size(0);
     
-    __local int s_colx[2][THREADS_COUNT]; // Alocar aqui
-    __local int s_coly[2][THREADS_COUNT]; // Alocar aqui
+
 
 
     s_colx[0][idx] = s_colx[1][idx] = busV_o[idx].x;
@@ -751,7 +755,8 @@ __kernel void cl_kernel_single_phase(
    size_t losize = get_local_size(0);
    size_t loid = get_local_id(0);
    size_t nugr = get_num_groups(0);
-    
+	__local int s_colx[2][THREADS_COUNT];
+	__local int s_coly[2][THREADS_COUNT];
 
     int idx = loid;
     int by = step;
@@ -781,12 +786,25 @@ __kernel void cl_kernel_single_phase(
 	
     // TODO otimizar considerando warps
 	//if (i < i1) {
-		cl_process_internal_diagonals_single_phase(xLen, idx, i, j, i0, j0, i1, j1, busH, extraH, busV_h, busV_e, busV_o, &max, &max_pos, flush_id, loadColumn_h, loadColumn_e, flushColumn_h, flushColumn_e, d_split, t_seq0, t_seq1);
+		cl_process_internal_diagonals_single_phase(xLen, idx, i, j, i0, j0, i1, j1, busH, extraH, busV_h, busV_e, busV_o, &max, &max_pos, flush_id, loadColumn_h, loadColumn_e, flushColumn_h, flushColumn_e, d_split, t_seq0, t_seq1, s_colx, s_coly);
 	//}
 
     //printf("\n\n ####### idx: %d  ----  max: %d  #########", idx, max);
-   
-    if (cl_findMaxSmall(idx, max)) {
+   	local int s_max;
+	local int s_idx;
+	local int response;
+
+	s_max = -INF;
+	//barrier(CLK_GLOBAL_MEM_FENCE);
+	barrier(CLK_LOCAL_MEM_FENCE);
+
+   	response = atomic_max(&s_max, max);
+	if (s_max == max) {
+		s_idx = idx;
+	}
+    //barrier(CLK_GLOBAL_MEM_FENCE);
+    barrier(CLK_LOCAL_MEM_FENCE);
+    if (s_idx == idx) {
       
 	blockResult[0].w = max;
 	blockResult[0].x = max_pos.x;
